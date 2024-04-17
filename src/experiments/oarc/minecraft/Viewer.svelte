@@ -1,21 +1,27 @@
+
 <script lang="ts">
     'use strict';
     //https://www.npmjs.com/package/s2-geometry?activeTab=readme
 
     import { setContext } from 'svelte';
     import { writable, type Writable } from 'svelte/store';
+    import { recentLocalisation } from '../../../stateStore';
+
     import ArCloudOverlay from '@components/dom-overlays/ArCloudOverlay.svelte';
     import Parent from '@components/Viewer.svelte';
     import type webxr from '../../../core/engines/webxr';
     import type ogl from '../../../core/engines/ogl/ogl';
-    const S2 = require('s2-geometry').S2;
+    import {S2} from 's2-geometry'; // this has no TypeScript types, but it still works
+    import MinecraftOverlay from './MinecraftOverlay.svelte';
+
+
     //We are using level 24 because it is approximately 0.5m in sidelength
     const S2_LEVEL = 24;
     let parentInstance: Parent;
     let xrEngine: webxr;
     let tdEngine: ogl;
     let settings: Writable<Record<string, unknown>> = writable({});
-
+    let minecraftOverlay: MinecraftOverlay;
     let parentState = writable();
     setContext('state', parentState);
 
@@ -180,6 +186,8 @@
         return { qW, qX, qY, qZ };
     }
 
+
+    // NOTE: this won't actually write into the database, it just creates an SCR locally
     function CreateSCD(latitude: number, longitude: number, height: number, url: string, id: number): any {
         //SCR
 
@@ -225,42 +233,59 @@
         return scr;
     }
 
-    //Hardcoded blocks
+    function placeTestBlocks() {
 
-    let Block1 = new Block('https://raw.githubusercontent.com/balazs-ladjanszki/3d/main/grass%20block_0.5.glb', 'grass', 1, 'Balazs', new Date());
-    let Block2 = new Block('https://raw.githubusercontent.com/balazs-ladjanszki/3d/main/grass%20block_0.5.glb', 'grass', 2, 'Balazs', new Date());
-    let Block3 = new Block('https://raw.githubusercontent.com/balazs-ladjanszki/3d/main/grass%20block_0.5.glb', 'grass', 3, 'Balazs', new Date());
-    let Block4 = new Block('https://raw.githubusercontent.com/balazs-ladjanszki/3d/main/grass%20block_0.5.glb', 'grass', 4, 'Balazs', new Date());
+        //Hardcoded blocks
+        let Block1 = new Block('https://raw.githubusercontent.com/balazs-ladjanszki/3d/main/grass%20block_0.5.glb', 'grass', 1, 'Balazs', new Date());
+        let Block2 = new Block('https://raw.githubusercontent.com/balazs-ladjanszki/3d/main/grass%20block_0.5.glb', 'grass', 2, 'Balazs', new Date());
+        let Block3 = new Block('https://raw.githubusercontent.com/balazs-ladjanszki/3d/main/grass%20block_0.5.glb', 'grass', 3, 'Balazs', new Date());
+        let Block4 = new Block('https://raw.githubusercontent.com/balazs-ladjanszki/3d/main/grass%20block_0.5.glb', 'grass', 4, 'Balazs', new Date());
 
-    //1:47.47264089476975, 19.05938926889718
-    //2:47.47262570711014, 19.05940261618721
-    //3:47.47261194465591, 19.05942227834729
-    New_Block(47.47264089476975, 19.05938926889718, Block1);
-    New_Block(47.47262570711014, 19.05940261618721, Block2);
-    New_Block(47.47261194465591, 19.05942227834729, Block3);
-    New_Block(47.47261194465591, 19.05942227834729, Block4);
+        console.log("XXXX");
+        console.log($recentLocalisation.geopose);
+        const myLat=$recentLocalisation.geopose.position!.lat;
+        const myLon=$recentLocalisation.geopose.position!.lon;
+        const myH=$recentLocalisation.geopose.position!.h;
 
-    cellMap.forEach((cell, id) => {
-        let cellid = cell.get_id();
-        let latlng = S2.idToLatLng(cellid);
-        for (let i = 0; i < cell.content.blocks.length; i++) {
+        //1:47.47264089476975, 19.05938926889718
+        //2:47.47262570711014, 19.05940261618721
+        //3:47.47261194465591, 19.05942227834729
+        //New_Block(47.47264089476975, 19.05938926889718, Block1);
+        //New_Block(47.47262570711014, 19.05940261618721, Block2);
+        //New_Block(47.47261194465591, 19.05942227834729, Block3);
+        //New_Block(47.47261194465591, 19.05942227834729, Block4);
 
-            const latitude = latlng.lat;
-            const longitude = latlng.lng;
-            const height = 0.5 * cell.get_height();
-            const url = cell.content.blocks[i].get_url();
+        New_Block(myLat, myLon, Block1); // temporarily use the position of the last localization
 
-            let scr = CreateSCD(latitude,longitude,height,url,i);
+        cellMap.forEach((cell, id) => {
+            let cellid = cell.get_id();
+            let latlng = S2.idToLatLng(cellid);
+            for (let i = 0; i < cell.content.blocks.length; i++) {
 
-            parentInstance.placeContent([[scr]]);
-        }
-    });
+                const latitude = latlng.lat;
+                const longitude = latlng.lng;
+                const height = 0.5 * cell.get_height();
+                const url = cell.content.blocks[i].get_url();
+
+                let scr = CreateSCD(latitude,longitude,height,url,i);
+
+                parentInstance.placeContent([[scr]]);
+            }
+        });
+    }
+
+    function relocalize() {
+        parentInstance.relocalize();
+    }
+
 </script>
 
 <Parent bind:this={parentInstance} on:arSessionEnded>
     <svelte:fragment slot="overlay" let:isLocalizing let:isLocalized let:isLocalisationDone let:firstPoseReceived>
         {#if $settings.localisation && !isLocalisationDone}
             <ArCloudOverlay hasPose={firstPoseReceived} {isLocalizing} {isLocalized} on:startLocalisation={() => parentInstance.startLocalisation()} />
+        {:else}
+            <MinecraftOverlay bind:this={minecraftOverlay} on:relocalize={() => relocalize()} on:newblock={() => placeTestBlocks()} />
         {/if}
     </svelte:fragment>
 </Parent>
