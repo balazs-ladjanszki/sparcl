@@ -1,4 +1,3 @@
-
 <script lang="ts">
     'use strict';
     //https://www.npmjs.com/package/s2-geometry?activeTab=readme
@@ -6,14 +5,14 @@
     import { setContext } from 'svelte';
     import { writable, type Writable } from 'svelte/store';
     import { recentLocalisation } from '../../../stateStore';
+    import { Vec3, Quat, type Transform } from 'ogl';
 
     import ArCloudOverlay from '@components/dom-overlays/ArCloudOverlay.svelte';
     import Parent from '@components/Viewer.svelte';
     import type webxr from '../../../core/engines/webxr';
     import type ogl from '../../../core/engines/ogl/ogl';
-    import {S2} from 's2-geometry'; // this has no TypeScript types, but it still works
+    import { S2 } from 's2-geometry'; // this has no TypeScript types, but it still works
     import MinecraftOverlay from './MinecraftOverlay.svelte';
-
 
     //We are using level 24 because it is approximately 0.5m in sidelength
     const S2_LEVEL = 24;
@@ -21,9 +20,32 @@
     let xrEngine: webxr;
     let tdEngine: ogl;
     let settings: Writable<Record<string, unknown>> = writable({});
+    let reticle: Transform | null = null; // TODO: Mesh instead of Transform
+    let experimentIntervalId: ReturnType<typeof setInterval> | undefined;
+    let doExperimentAutoPlacement = false;
+    let hitTestSource: XRHitTestSource | undefined;
     let minecraftOverlay: MinecraftOverlay;
-    let parentState = writable();
+    let parentState = writable<{ hasLostTracking: boolean; isLocalized: boolean; localisation: boolean; isLocalisationDone: boolean; showFooter: boolean }>();
     setContext('state', parentState);
+
+    let log: Block;
+    let grass: Block;
+    //let plank: Block;
+    let dirt: Block;
+    let stone: Block;
+    let cobblestone: Block;
+    let chosenBlock: Block;
+
+    function initializeBlocks() {
+        grass = new Block('https://raw.githubusercontent.com/balazs-ladjanszki/3d/main/grass%20block_0.5.glb', 'grass', 1, 'Balazs', new Date());
+        dirt = new Block('https://raw.githubusercontent.com/balazs-ladjanszki/3d/main/dirt_new_0.5.glb', 'dirt', 2, 'Balazs', new Date());
+        log = new Block('https://raw.githubusercontent.com/balazs-ladjanszki/3d/main/log_0.5.glb', 'log', 3, 'Balazs', new Date());
+        //plank = new Block('https://raw.githubusercontent.com/balazs-ladjanszki/3d/main/plank_0.5.glb', 'plank', 4, 'Balazs', new Date());
+        stone = new Block('https://raw.githubusercontent.com/balazs-ladjanszki/3d/main/stone_0.5.glb', 'stone', 5, 'Balazs', new Date());
+        cobblestone = new Block('https://raw.githubusercontent.com/balazs-ladjanszki/3d/main/cobblestone_0.5.glb', 'cobblestone', 6, 'Balazs', new Date());
+
+        chosenBlock = grass;
+    }
 
     /**
      * Initial setup.
@@ -42,25 +64,33 @@
         }
 
         startSession();
+        initializeBlocks();
     }
 
     /**
      * Setup required AR features and start the XRSession.
      */
-     async function startSession() {
+    async function startSession() {
         await parentInstance.startSession(
             onXrFrameUpdate,
             onXrSessionEnded,
             onXrNoPose,
-            (xr, session, gl) => {
+            (xr, result, gl) => {
                 if (gl) {
-                    xr.glBinding = new XRWebGLBinding(session, gl);
+                    xr.glBinding = new XRWebGLBinding(result, gl);
                     xr.initCameraCapture(gl);
                 }
-                session.requestReferenceSpace('viewer');
+
+                result
+                    .requestReferenceSpace('viewer')
+                    .then((refSpace) => result.requestHitTestSource?.({ space: refSpace }))
+                    .then((source) => (hitTestSource = source));
             },
-            ['dom-overlay', 'camera-access', 'local-floor'],
+            ['dom-overlay', 'camera-access', 'anchors', 'hit-test', 'local-floor'],
+            [],
         );
+
+        tdEngine.setExperimentTapHandler(experimentTapHandler);
     }
 
     /**
@@ -71,14 +101,49 @@
      * @param frame     The XRFrame provided to the update loop
      * @param floorPose The pose of the device as reported by the XRFrame
      */
-     function onXrFrameUpdate(time: DOMHighResTimeStamp, frame: XRFrame, floorPose: XRViewerPose) {
-        parentInstance.onXrFrameUpdate(time, frame, floorPose);
+    function onXrFrameUpdate(time: DOMHighResTimeStamp, frame: XRFrame, floorPose: XRViewerPose, floorSpaceReference: XRSpace) {
+        parentInstance.handlePoseHeartbeat();
+
+        if (!hitTestSource) {
+            parentInstance.onXrFrameUpdate(time, frame, floorPose);
+            return;
+        }
+
+        const hitTestResults = frame.getHitTestResults(hitTestSource);
+        if (hitTestResults.length > 0) {
+            if ($settings.localisation && !$parentState.isLocalized) {
+                parentInstance.onXrFrameUpdate(time, frame, floorPose);
+            } else {
+                $parentState.showFooter = ($settings.showstats || ($settings.localisation && !$parentState.isLocalisationDone)) as boolean;
+                if (reticle === null) {
+                    reticle = tdEngine.addReticle();
+                }
+                const reticlePose = hitTestResults[0].getPose(floorSpaceReference);
+                const position = reticlePose?.transform.position;
+                const orientation = reticlePose?.transform.orientation;
+                if (position && orientation) {
+                    tdEngine.updateReticlePose(reticle, new Vec3(position.x, position.y, position.z), new Quat(orientation.x, orientation.y, orientation.z, orientation.w));
+                }
+            }
+        }
+
+        xrEngine.setViewportForView(floorPose.views[0]);
+        tdEngine.render(time, floorPose.views[0]);
     }
 
     /**
      * Let's the app know that the XRSession was closed.
      */
     function onXrSessionEnded() {
+        parentInstance.onXrSessionEnded();
+        if (hitTestSource != undefined) {
+            hitTestSource.cancel();
+            hitTestSource = undefined;
+        }
+        if (experimentIntervalId) {
+            clearInterval(experimentIntervalId);
+            experimentIntervalId = undefined;
+        }
         parentInstance.onXrSessionEnded();
     }
 
@@ -107,6 +172,10 @@
 
         get_url(): string {
             return this.url;
+        }
+
+        getId(): number {
+            return this.id;
         }
     }
 
@@ -166,9 +235,58 @@
         }
 
         current_cell.add_Block(block); //chosen_block will come from user interaction
+
+
+        //must get the lat and lon of the s2 cell, not the arguments
+        const latlng = S2.idToLatLng(id);
+        const cellLatitude = latlng.lat;
+        const cellLongitude = latlng.lng;
+        console.log(latlng);
+        let scr = CreateSCD(cellLatitude, cellLongitude, current_cell.get_height(), block.get_url(), block.getId());
+        parentInstance.placeContent([[scr]]);
+        console.log("block created");
         current_cell.increase_height();
     }
 
+    /**
+     * There might be the case that a tap handler for off object taps. This is the place to handle that.
+     *
+     * Not meant for other usage than that.
+     *
+     * @param event  Event      The Javascript event object
+     * @param auto  boolean     true when called from automatic placement interval
+     */
+    function experimentTapHandler() {
+        if ($parentState.hasLostTracking == false && reticle != null) {
+            //NOTE: ISMAR2021 experiment:
+            // keep track of last localization (global and local)
+            // when tapped, determine the global position of the tap, and save the global location of the object
+            // create SCR from the object and share it with the others
+            // when received, place the same way as a downloaded SCR.
+            if ($parentState.isLocalisationDone) {
+                const globalObjectPose = tdEngine.convertLocalPoseToGeoPose(reticle.position, reticle.quaternion);
+                const latitude = globalObjectPose.position.lat
+                const longitude = globalObjectPose.position.lon
+                console.log(longitude);
+                console.log("new block called");
+                New_Block(latitude, longitude, chosenBlock);
+            }
+        }
+    }
+
+    /**
+     * Toggle automatic placement of placeholders for experiment mode.
+     */
+    function toggleExperimentalPlacement() {
+        doExperimentAutoPlacement = !doExperimentAutoPlacement;
+        console.log("button pressed");
+
+        if (doExperimentAutoPlacement) {
+            experimentIntervalId = setInterval(() => experimentTapHandler(), 1000);
+        } else {
+            clearInterval(experimentIntervalId);
+        }
+    }
     //takes in the longitude as rotation angle on the up axis and turns it into quaternions
     function toQuaternion(longitude: number): any {
         const cr: number = Math.cos(0 * 0.5);
@@ -185,7 +303,6 @@
 
         return { qW, qX, qY, qZ };
     }
-
 
     // NOTE: this won't actually write into the database, it just creates an SCR locally
     function CreateSCD(latitude: number, longitude: number, height: number, url: string, id: number): any {
@@ -234,18 +351,17 @@
     }
 
     function placeTestBlocks() {
-
         //Hardcoded blocks
         let Block1 = new Block('https://raw.githubusercontent.com/balazs-ladjanszki/3d/main/grass%20block_0.5.glb', 'grass', 1, 'Balazs', new Date());
         let Block2 = new Block('https://raw.githubusercontent.com/balazs-ladjanszki/3d/main/grass%20block_0.5.glb', 'grass', 2, 'Balazs', new Date());
         let Block3 = new Block('https://raw.githubusercontent.com/balazs-ladjanszki/3d/main/grass%20block_0.5.glb', 'grass', 3, 'Balazs', new Date());
         let Block4 = new Block('https://raw.githubusercontent.com/balazs-ladjanszki/3d/main/grass%20block_0.5.glb', 'grass', 4, 'Balazs', new Date());
 
-        console.log("XXXX");
+        console.log('XXXX');
         console.log($recentLocalisation.geopose);
-        const myLat=$recentLocalisation.geopose.position!.lat;
-        const myLon=$recentLocalisation.geopose.position!.lon;
-        const myH=$recentLocalisation.geopose.position!.h;
+        const myLat = $recentLocalisation.geopose.position!.lat;
+        const myLon = $recentLocalisation.geopose.position!.lon;
+        const myH = $recentLocalisation.geopose.position!.h;
 
         //1:47.47264089476975, 19.05938926889718
         //2:47.47262570711014, 19.05940261618721
@@ -261,13 +377,12 @@
             let cellid = cell.get_id();
             let latlng = S2.idToLatLng(cellid);
             for (let i = 0; i < cell.content.blocks.length; i++) {
-
                 const latitude = latlng.lat;
                 const longitude = latlng.lng;
                 const height = 0.5 * cell.get_height();
                 const url = cell.content.blocks[i].get_url();
 
-                let scr = CreateSCD(latitude,longitude,height,url,i);
+                let scr = CreateSCD(latitude, longitude, height, url, i);
 
                 parentInstance.placeContent([[scr]]);
             }
@@ -276,8 +391,31 @@
 
     function relocalize() {
         parentInstance.relocalize();
+        reticle = null;
     }
 
+    function chooseBlock(blocktype: string) {
+        switch (blocktype) {
+            case 'log':
+                chosenBlock = log;
+                break;
+            case 'grass':
+                chosenBlock = grass;
+                break;
+            case 'dirt':
+                chosenBlock = dirt;
+                break;
+            case 'stone':
+                chosenBlock = stone;
+                break;
+            case 'cobblestone':
+                chosenBlock = cobblestone;
+                break;
+            default:
+                chosenBlock = cobblestone;
+                break;
+        }
+    }
 </script>
 
 <Parent bind:this={parentInstance} on:arSessionEnded>
@@ -285,7 +423,17 @@
         {#if $settings.localisation && !isLocalisationDone}
             <ArCloudOverlay hasPose={firstPoseReceived} {isLocalizing} {isLocalized} on:startLocalisation={() => parentInstance.startLocalisation()} />
         {:else}
-            <MinecraftOverlay bind:this={minecraftOverlay} on:relocalize={() => relocalize()} on:newblock={() => placeTestBlocks()} />
+            <MinecraftOverlay
+                bind:this={minecraftOverlay}
+                on:relocalize={() => relocalize()}
+                on:log={() => chooseBlock('log')}
+                on:grass={() => chooseBlock('grass')}
+                on:plank={() => chooseBlock('plank')}
+                on:dirt={() => chooseBlock('dirt')}
+                on:stone={() => chooseBlock('stone')}
+                on:cobblestone={() => chooseBlock('cobblestone')}
+                on:placeBlock={() => experimentTapHandler()}
+            />
         {/if}
     </svelte:fragment>
 </Parent>
