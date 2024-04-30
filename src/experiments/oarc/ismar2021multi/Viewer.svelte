@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { setContext } from 'svelte';
+    import { onMount, setContext } from 'svelte';
     import { createEventDispatcher } from 'svelte';
     import { get, writable, type Writable } from 'svelte/store';
     import { v4 as uuidv4 } from 'uuid';
@@ -14,6 +14,7 @@
     import type webxr from '../../../core/engines/webxr';
     import type ogl from '../../../core/engines/ogl/ogl';
     import type { ObjectDescription } from '../../../types/xr';
+    import { getAutomergeDocumentData } from '../../../core/p2pnetwork';
 
     let parentInstance: Parent;
     let xrEngine: webxr;
@@ -29,6 +30,16 @@
     let parentState = writable<{ hasLostTracking: boolean; isLocalized: boolean; localisation: boolean; isLocalisationDone: boolean; showFooter: boolean }>();
     setContext('state', parentState);
 
+    $: {
+        if ($recentLocalisation?.geopose.position != null) {
+            const assets = getAutomergeDocumentData();
+            if (assets) {
+                for (const asset of assets) {
+                    onNetworkEvent({ object_created: asset });
+                }
+            }
+        }
+    }
     // Used to dispatch events to parent
     const dispatch = createEventDispatcher<{ broadcast: { event: string; value: any; routing_key?: string } }>();
 
@@ -95,10 +106,10 @@
 
         const hitTestResults = frame.getHitTestResults(hitTestSource);
         if (hitTestResults.length > 0) {
-            if ($settings.localisation && !$parentState.isLocalized) {
+            if ($settings.localizationRequired && !$parentState.isLocalized) {
                 parentInstance.onXrFrameUpdate(time, frame, floorPose);
             } else {
-                $parentState.showFooter = ($settings.showstats || ($settings.localisation && !$parentState.isLocalisationDone)) as boolean;
+                $parentState.showFooter = ($settings.showstats || ($settings.localizationRequired && !$parentState.isLocalisationDone)) as boolean;
                 if (reticle === null) {
                     reticle = tdEngine.addReticle();
                 }
@@ -106,7 +117,9 @@
                 const position = reticlePose?.transform.position;
                 const orientation = reticlePose?.transform.orientation;
                 if (position && orientation) {
-                    tdEngine.updateReticlePose(reticle, new Vec3(position.x, position.y, position.z), new Quat(orientation.x, orientation.y, orientation.z, orientation.w));
+                    tdEngine.updateReticlePose(reticle,
+                            new Vec3(position.x, position.y, position.z),
+                            new Quat(orientation.x, orientation.y, orientation.z, orientation.w));
                 }
             }
         }
@@ -156,18 +169,24 @@
      * @param auto  boolean     true when called from automatic placement interval
      */
     function experimentTapHandler() {
-        if ($parentState.hasLostTracking == false && reticle != null) {
-            //NOTE: ISMAR2021 experiment:
-            // keep track of last localization (global and local)
-            // when tapped, determine the global position of the tap, and save the global location of the object
-            // create SCR from the object and share it with the others
-            // when received, place the same way as a downloaded SCR.
-            if ($parentState.isLocalisationDone) {
-                const object_description = createRandomObjectDescription();
-                shareObject(object_description, reticle.position, reticle.quaternion);
-                experimentOverlay?.objectPlaced();
-            }
+        if (reticle == null) {
+            return;
         }
+        if ($parentState.hasLostTracking) {
+            return;
+        }
+        if ($settings.localizationRequired && !$parentState.isLocalisationDone) {
+            return;
+        }
+
+        //NOTE: ISMAR2021 experiment:
+        // keep track of last localization (global and local)
+        // when tapped, determine the global position of the tap, and save the global location of the object
+        // create SCR from the object and share it with the others
+        // when received, place the same way as a downloaded SCR.
+        const object_description = createRandomObjectDescription();
+        shareObject(object_description, reticle.position, reticle.quaternion);
+        experimentOverlay?.objectSent();
     }
 
     /**
@@ -284,8 +303,8 @@
             //if (data.sender != $peerIdStr) { // ignore own messages which are also delivered
             const scr = data.scr;
             if ('tenant' in scr && scr.tenant === 'ISMAR2021demo') {
-                experimentOverlay?.objectReceived();
                 parentInstance.placeContent([[scr]]); // WARNING: wrap into an array
+                experimentOverlay?.objectReceived();
             }
             //}
         }
@@ -294,7 +313,7 @@
 
 <Parent bind:this={parentInstance} on:arSessionEnded>
     <svelte:fragment slot="overlay" let:isLocalizing let:isLocalized let:isLocalisationDone let:receivedContentTitles let:firstPoseReceived>
-        {#if $settings.localisation && !isLocalisationDone}
+        {#if $settings.localizationRequired && !isLocalisationDone}
             <p>{receivedContentTitles.join()}</p>
             <ArCloudOverlay hasPose={firstPoseReceived} {isLocalizing} {isLocalized} on:startLocalisation={() => parentInstance.startLocalisation()} />
         {:else}

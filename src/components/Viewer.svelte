@@ -14,7 +14,7 @@
     import { createEventDispatcher, getContext, onDestroy } from 'svelte';
     import { writable, type Writable } from 'svelte/store';
     import { v4 as uuidv4 } from 'uuid';
-    import { debounce, type DebouncedFunc } from 'lodash';
+    import { debounce, forEach, type DebouncedFunc } from 'lodash';
     import { sendRequest, validateRequest, GeoPoseRequest, type GeoposeResponseType } from '@oarc/gpp-access';
     import { ImageOrientation, IMAGEFORMAT, CameraParam, CAMERAMODEL } from '@oarc/gpp-access';
     import { getContentsAtLocation, type Geopose, type SCR } from '@oarc/scd-access';
@@ -29,6 +29,7 @@
         debug_saveCameraImage,
         debug_loadCameraImage,
         debug_enablePointCloudContents,
+        debug_enableOGCPoIContents,
         initialLocation,
         receivedScrs,
         recentLocalisation,
@@ -48,6 +49,11 @@
 
     // Used to dispatch events to parent
     const dispatch = createEventDispatcher<{ arSessionEnded: undefined }>();
+
+    onDestroy(() => {
+        $recentLocalisation.geopose = {};
+        $recentLocalisation.floorpose = {};
+    });
 
     const message = (msg: string) => console.log(msg);
 
@@ -495,6 +501,11 @@
                     }
                 }
 
+                const globalObjectPose = record.content.geopose;
+                const localObjectPose = tdEngine.convertGeoPoseToLocalPose(globalObjectPose);
+                const localPosition = localObjectPose.position;
+                const localQuaternion = localObjectPose.quaternion;
+
                 // TODO: this method could handle any type of content:
                 //tdEngine.addSpatialContentRecord(globalObjectPose, record.content)
 
@@ -505,11 +516,6 @@
                     case 'placeholder': {
                         // NOTE: placeholder is a temporary type we use in all demos until we come up with a good list // AC removed it in Nov.2022
                         showContentsLog = true; // show log if at least one 3D object was received
-
-                        let globalObjectPose = record.content.geopose;
-                        let localObjectPose = tdEngine.convertGeoPoseToLocalPose(globalObjectPose);
-                        let position = localObjectPose.position;
-                        let orientation = localObjectPose.quaternion;
 
                         // DEPRECATED
                         // Augmented City proprietary structure (has no refs, has type infosticker and has custom_data fieds)
@@ -526,7 +532,7 @@
                         //             tdEngine.addClickEvent(experiencePlaceholder, () => experienceLoadHandler(experiencePlaceholder, position, orientation, url));
                         //             break;
                         //         case 'gltf':
-                        //             tdEngine.addModel(position, orientation, url);
+                        //             tdEngine.addModel(url, position, orientation);
                         //             break;
                         //         default:
                         //             console.log('Error: unexpected sticker subtype: ' + subtype);
@@ -538,17 +544,26 @@
                             const contentType = record.content.refs[0].contentType;
                             const url = record.content.refs[0].url;
                             if (contentType.includes('gltf')) {
-                                tdEngine.addModel(position, orientation, url);
+                                const node = tdEngine.addModel(url, localPosition, localQuaternion);
+                                if (content_definitions['animation'] != undefined) {
+                                    switch (content_definitions['animation']) {
+                                        case 'SPIN_UP':
+                                            tdEngine.setVerticallyRotating(node);
+                                            break;
+                                        default:
+                                            break
+                                    }
+                                }
                             } else {
                                 // we cannot load anything else but GLTF
                                 // so draw a placeholder instead
-                                const placeholder = tdEngine.addPlaceholder(record.content.keywords, position, orientation);
+                                const placeholder = tdEngine.addPlaceholder(record.content.keywords, localPosition, localQuaternion);
                                 handlePlaceholderDefinitions(tdEngine, placeholder /* record.content.definition */);
                             }
                         } else {
                             // we cannot load anything else but OSCP-compliant and AC-compliant 3D models
                             // so draw a placeholder instead
-                            const placeholder = tdEngine.addPlaceholder(record.content.keywords, position, orientation);
+                            const placeholder = tdEngine.addPlaceholder(record.content.keywords, localPosition, localQuaternion);
                             handlePlaceholderDefinitions(tdEngine, placeholder /* record.content.definition */);
                         }
                         break;
@@ -560,25 +575,20 @@
                             console.log('ISMAR2021demo object received!');
                             // TODO: the object_description is not standard data; it is only used for the ismar2021 demo
                             let object_description = (record.content as any).object_description;
-                            let globalObjectPose = record.content.geopose;
-                            let localObjectPose = tdEngine.convertGeoPoseToLocalPose(globalObjectPose);
-                            tdEngine.addObject(localObjectPose.position, localObjectPose.quaternion, object_description);
+                            tdEngine.addObject(localPosition, localQuaternion, object_description);
                         }
                         break;
                     }
+
                     case 'POINTCLOUD': {
                         if ($debug_enablePointCloudContents) {
-                            const globalObjectPose = record.content.geopose;
-                            const localObjectPose = tdEngine.convertGeoPoseToLocalPose(globalObjectPose);
-                            const position = localObjectPose.position;
-                            const orientation = localObjectPose.quaternion;
                             let url = '';
                             if (content_definitions['url'] != undefined) {
                                 url = content_definitions['url'];
                             } else {
                                 url = record.content.refs ? record.content.refs[0].url : '';
                             }
-                            tdEngine.addPointCloud(url, position, orientation);
+                            tdEngine.addPointCloud(url, localPosition, localQuaternion);
                         } else {
                             console.log('A POINTCLOUD content was received but this type is disabled');
                         }
@@ -586,10 +596,6 @@
                     }
 
                     case 'ICON': {
-                        const globalObjectPose = record.content.geopose;
-                        const localObjectPose = tdEngine.convertGeoPoseToLocalPose(globalObjectPose);
-                        const localPosition = localObjectPose.position;
-                        const localQuaternion = localObjectPose.quaternion;
                         let url = '';
                         if (content_definitions['url'] != undefined) {
                             url = content_definitions['url'];
@@ -607,9 +613,91 @@
                         tdEngine.addLogoObject(url, localPosition, localQuaternion, width, height);
                         break;
                     }
+
+                    case 'POI': {
+                        if (!$debug_enableOGCPoIContents) {
+                            console.log('An POI content was received but this type is disabled');
+                            break;
+                        }
+                        const url = record.content.refs ? record.content.refs[0].url : '';
+                        fetch(url)
+                            .then((response) => {
+                                if (response.ok) {
+                                    return response.json();
+                                } else {
+                                    console.error('Could not retrieve POIs from ' + url);
+                                    console.error(response.text());
+                                }
+                            })
+                            .then((poidata) => {
+
+                                const features = poidata.features;
+                                features.forEach((feature:any)=> {
+                                    const featureName = feature.name.name; // WARNING: name.name is according to the OGC standard
+                                    //console.log("POI received:");
+                                    //console.log(featureName);
+                                    const poiLat = feature.geometry.coordinates[0];
+                                    const poiLon = feature.geometry.coordinates[1];
+                                    let poiH = 0.0;
+                                    if (feature.geometry.coordinates.length > 2) {
+                                        poiH = feature.geometry.coordinates[2];
+                                    }
+                                    const featureGeopose = {
+                                        // WARNING: now we need to harcode height because it is not part of OGC PoI
+                                        position: {lat: poiLat, lon: poiLon, h: poiH},
+                                        quaternion: { x: 0, y: 0, z: 0, w: 1},
+                                    };
+                                    const localFeaturePose = tdEngine.convertGeoPoseToLocalPose(featureGeopose);
+                                    const pinModel = tdEngine.addModel('/media/models/map_pin.glb', localFeaturePose.position, localFeaturePose.quaternion, new Vec3(2,2,2));
+                                    tdEngine.setVerticallyRotating(pinModel);
+
+                                    let localTextPosition = localFeaturePose.position.clone();
+                                    localTextPosition.y += 3;
+                                    const textColor = new Vec3(0.063, 0.741, 1.0); // light blue
+                                    const textMesh = tdEngine.addTextObject(localTextPosition, localFeaturePose.quaternion, featureName, textColor);
+                                    textMesh.then((node) => {
+                                        tdEngine.setTowardsCameraRotating(node);
+                                    })
+
+                                });
+                            })
+                            .catch((error) => {
+                                console.error('Error while processing POIs: ' + error);
+                            });
+
+                        break;
+                    }
+
+                    case 'TEXT': {
+                        if (!$debug_enableOGCPoIContents) {
+                            console.log('A TEXT content was received but this type is disabled');
+                            break;
+                        }
+                        const url = record.content.refs ? record.content.refs[0].url : '';
+                        fetch(url)
+                            .then((response) => {
+                                if (response.ok) {
+                                    return response.text();
+                                } else {
+                                    console.error('Could not retrieve TEXT from ' + url);
+                                    console.error(response.text());
+                                }
+                            })
+                            .then((textdata) => {
+                                //console.log("TEXT received:")
+                                //console.log(textdata)
+                                tdEngine.addTextObject(localPosition, localQuaternion, textdata!);
+                            })
+                            .catch((error) => {
+                                console.error('Error while processing TEXT: ' + error);
+                            });
+                        break;
+                    }
+
                     default: {
                         console.log(record.content.title + ' has unexpected content type: ' + record.content.type);
                         console.log(record.content);
+                        break;
                     }
                 }
             });
