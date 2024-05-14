@@ -191,7 +191,7 @@
             (this.url = url), (this.type = type), (this.id = id), (this.author = author), (this.timestamp = timestamp);
         }
 
-        get_url(): string {
+        getUrl(): string {
             return this.url;
         }
 
@@ -218,21 +218,21 @@
             };
         }
 
-        get_height(): number {
+        getHeight(): number {
             return this.height;
         }
 
         // Increases the height of the blocks by one
-        increase_height(): void {
+        increaseHeight(): void {
             this.height++;
         }
 
         // returns the id of the s2 cell
-        get_id(): number {
+        getId(): number {
             return this.s2cell_id;
         }
 
-        add_Block(minecraft_block: Block) {
+        addBlock(minecraft_block: Block) {
             this.content.blocks[this.content.blocks.length] = minecraft_block;
         }
     }
@@ -262,7 +262,7 @@
         });
     }*/
 
-    function New_Block(latitude: number, longitude: number, block: Block): void {
+    function newBlock(latitude: number, longitude: number, block: Block): void {
         // Get the id of the S2 cell on level 24 (S2_LEVEL)
         let key = S2.latLngToKey(latitude, longitude, S2_LEVEL);
         let id = S2.keyToId(key);
@@ -277,15 +277,15 @@
             cellMap.set(id, current_cell);
         }
 
-        current_cell.add_Block(block); //chosen_block will come from user interaction
+        current_cell.addBlock(block); //chosen_block will come from user interaction
 
         //must get the lat and lon of the s2 cell, not the arguments
         const latlng = S2.idToLatLng(id);
         let cellLatitude = latlng.lat;
         let cellLongitude = latlng.lng;
         console.log(latlng);
-        let height = (0.5 / 2 ** dimension) * current_cell.get_height();
-        let scr = CreateSCR(cellLatitude, cellLongitude, height, block.get_url(), block.getId());
+        let height = (0.5 / 2 ** dimension) * current_cell.getHeight();
+        let scr = CreateSCR(cellLatitude, cellLongitude, height, block.getUrl(), block.getId());
         let size = 1 / 2 ** dimension;
         //parentInstance.placeContent([[scr]]);
         console.log('block created');
@@ -310,7 +310,7 @@
 
         tdEngine.addModel(chosenBlock.get_url(), localpose.position, localpose.quaternion, new Vec3(size, size, size));*/
 
-        current_cell.increase_height();
+        current_cell.increaseHeight();
 
         const message_body = {
             scr: scr,
@@ -347,7 +347,7 @@
                 const longitude = globalObjectPose.position.lon;
                 console.log(longitude);
                 console.log('new block called');
-                New_Block(latitude, longitude, chosenBlock);
+                newBlock(latitude, longitude, chosenBlock);
             }
         }
     }
@@ -384,7 +384,6 @@
 
     // NOTE: this won't actually write into the database, it just creates an SCR locally
     function CreateSCR(latitude: number, longitude: number, height: number, url: string, id: number): any {
-        //SCR
 
         const quat = toQuaternion(-1 * longitude);
 
@@ -426,45 +425,6 @@
         };
 
         return scr;
-    }
-
-    function placeTestBlocks() {
-        //Hardcoded blocks
-        let Block1 = new Block('https://raw.githubusercontent.com/balazs-ladjanszki/3d/main/grass%20block_0.5.glb', 'grass', 1, 'Balazs', new Date());
-        let Block2 = new Block('https://raw.githubusercontent.com/balazs-ladjanszki/3d/main/grass%20block_0.5.glb', 'grass', 2, 'Balazs', new Date());
-        let Block3 = new Block('https://raw.githubusercontent.com/balazs-ladjanszki/3d/main/grass%20block_0.5.glb', 'grass', 3, 'Balazs', new Date());
-        let Block4 = new Block('https://raw.githubusercontent.com/balazs-ladjanszki/3d/main/grass%20block_0.5.glb', 'grass', 4, 'Balazs', new Date());
-
-        console.log('XXXX');
-        console.log($recentLocalisation.geopose);
-        const myLat = $recentLocalisation.geopose.position!.lat;
-        const myLon = $recentLocalisation.geopose.position!.lon;
-        const myH = $recentLocalisation.geopose.position!.h;
-
-        //1:47.47264089476975, 19.05938926889718
-        //2:47.47262570711014, 19.05940261618721
-        //3:47.47261194465591, 19.05942227834729
-        //New_Block(47.47264089476975, 19.05938926889718, Block1);
-        //New_Block(47.47262570711014, 19.05940261618721, Block2);
-        //New_Block(47.47261194465591, 19.05942227834729, Block3);
-        //New_Block(47.47261194465591, 19.05942227834729, Block4);
-
-        New_Block(myLat, myLon, Block1); // temporarily use the position of the last localization
-
-        cellMap.forEach((cell, id) => {
-            let cellid = cell.get_id();
-            let latlng = S2.idToLatLng(cellid);
-            for (let i = 0; i < cell.content.blocks.length; i++) {
-                const latitude = latlng.lat;
-                const longitude = latlng.lng;
-                const height = 0.5 * cell.get_height();
-                const url = cell.content.blocks[i].get_url();
-
-                let scr = CreateSCR(latitude, longitude, height, url, i);
-
-                parentInstance.placeContent([[scr]]);
-            }
-        });
     }
 
     function relocalize() {
