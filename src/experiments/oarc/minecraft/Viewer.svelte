@@ -3,9 +3,10 @@
     //https://www.npmjs.com/package/s2-geometry?activeTab=readme
 
     import { setContext } from 'svelte';
-    import { writable, type Writable } from 'svelte/store';
-    import { recentLocalisation } from '../../../stateStore';
+    import { get, writable, type Writable } from 'svelte/store';
+    import { peerIdStr,  recentLocalisation } from '../../../stateStore';
     import { Vec3, Quat, type Transform } from 'ogl';
+    import { createEventDispatcher } from 'svelte';
 
     import ArCloudOverlay from '@components/dom-overlays/ArCloudOverlay.svelte';
     import Parent from '@components/Viewer.svelte';
@@ -13,9 +14,15 @@
     import type ogl from '../../../core/engines/ogl/ogl';
     import { S2 } from 's2-geometry'; // this has no TypeScript types, but it still works
     import MinecraftOverlay from './MinecraftOverlay.svelte';
+    import { getAutomergeDocumentData } from '../../../core/p2pnetwork';
+    import { GEOPOSE } from '@src/core/common';
+    import { GeoPoseRequest } from '@oarc/gpp-access';
+    //import { spawn } from 'child_process';
 
     //We are using level 24 because it is approximately 0.5m in sidelength
-    const S2_LEVEL = 24;
+    let dimension = 0;
+    let S2_LEVEL = 24;
+    const S2BaseLevel = 24;
     let parentInstance: Parent;
     let xrEngine: webxr;
     let tdEngine: ogl;
@@ -26,8 +33,7 @@
     let hitTestSource: XRHitTestSource | undefined;
     let minecraftOverlay: MinecraftOverlay;
     let parentState = writable<{ hasLostTracking: boolean; isLocalized: boolean; localisation: boolean; isLocalisationDone: boolean; showFooter: boolean }>();
-    setContext('state', parentState);
-
+    
     let log: Block;
     let grass: Block;
     //let plank: Block;
@@ -35,6 +41,21 @@
     let stone: Block;
     let cobblestone: Block;
     let chosenBlock: Block;
+    
+    const dispatch = createEventDispatcher<{ broadcast: { event: string; value: any; routing_key?: string } }>();
+    
+    setContext('state', parentState);
+
+    $: {
+        if ($recentLocalisation?.geopose.position != null) {
+            const assets = getAutomergeDocumentData();
+            if (assets) {
+                for (const asset of assets) {
+                    onNetworkEvent({ object_created: asset });
+                }
+            }
+        }
+    }
 
     function initializeBlocks() {
         grass = new Block('https://raw.githubusercontent.com/balazs-ladjanszki/3d/main/grass%20block_0.5.glb', 'grass', 1, 'Balazs', new Date());
@@ -219,6 +240,28 @@
     // Cell map
     let cellMap: Map<number, Cell> = new Map();
 
+    /*function showPoints(lat: number, lon: number) {
+        const data_to_send = {
+            lat: lat,
+            lon: lon,
+            lvl: S2_LEVEL,
+            v0lat: undefined,
+            v0lon: undefined,
+            v1lat: undefined,
+            v1lon: undefined,
+            v2lat: undefined,
+            v2lon: undefined,
+            v3lat: undefined,
+            v3lon: undefined,
+        };
+
+        const python_process = spawn('python3', ['./communication.py', JSON.stringify(data_to_send)]);
+
+        python_process.stdout.on('data', (data: any) => {
+            console.log('Data recieved: ', JSON.parse(data));
+        });
+    }*/
+
     function New_Block(latitude: number, longitude: number, block: Block): void {
         // Get the id of the S2 cell on level 24 (S2_LEVEL)
         let key = S2.latLngToKey(latitude, longitude, S2_LEVEL);
@@ -236,16 +279,50 @@
 
         current_cell.add_Block(block); //chosen_block will come from user interaction
 
-
         //must get the lat and lon of the s2 cell, not the arguments
         const latlng = S2.idToLatLng(id);
-        const cellLatitude = latlng.lat;
-        const cellLongitude = latlng.lng;
+        let cellLatitude = latlng.lat;
+        let cellLongitude = latlng.lng;
         console.log(latlng);
-        let scr = CreateSCD(cellLatitude, cellLongitude, current_cell.get_height(), block.get_url(), block.getId());
-        parentInstance.placeContent([[scr]]);
-        console.log("block created");
+        let height = (0.5 / 2 ** dimension) * current_cell.get_height();
+        let scr = CreateSCR(cellLatitude, cellLongitude, height, block.get_url(), block.getId());
+        let size = 1 / 2 ** dimension;
+        //parentInstance.placeContent([[scr]]);
+        console.log('block created');
+
+        /*let quat = toQuaternion(-1 * cellLongitude);
+
+        let globalpose = {
+            position: {
+                lat: cellLatitude,
+                lon: cellLongitude,
+                h: height,
+            },
+            quaternion: {
+                x: quat.qX,
+                y: quat.qY,
+                z: quat.qZ,
+                w: quat.qW,
+            },
+        };
+
+        const localpose = tdEngine.convertGeoPoseToLocalPose(globalpose);
+
+        tdEngine.addModel(chosenBlock.get_url(), localpose.position, localpose.quaternion, new Vec3(size, size, size));*/
+
         current_cell.increase_height();
+
+        const message_body = {
+            scr: scr,
+            sender: $peerIdStr,
+            timestamp: new Date().getTime(),
+        };
+
+        dispatch('broadcast', {
+            event: 'object_created', // TODO: should be unique to the object instance or just to the creation event?
+            value: message_body,
+        });
+        //showPoints(latitude, longitude);
     }
 
     /**
@@ -265,10 +342,11 @@
             // when received, place the same way as a downloaded SCR.
             if ($parentState.isLocalisationDone) {
                 const globalObjectPose = tdEngine.convertLocalPoseToGeoPose(reticle.position, reticle.quaternion);
-                const latitude = globalObjectPose.position.lat
-                const longitude = globalObjectPose.position.lon
+                console.log(globalObjectPose.position + '  globalobjectpose');
+                const latitude = globalObjectPose.position.lat;
+                const longitude = globalObjectPose.position.lon;
                 console.log(longitude);
-                console.log("new block called");
+                console.log('new block called');
                 New_Block(latitude, longitude, chosenBlock);
             }
         }
@@ -279,7 +357,7 @@
      */
     function toggleExperimentalPlacement() {
         doExperimentAutoPlacement = !doExperimentAutoPlacement;
-        console.log("button pressed");
+        console.log('button pressed');
 
         if (doExperimentAutoPlacement) {
             experimentIntervalId = setInterval(() => experimentTapHandler(), 1000);
@@ -305,10 +383,10 @@
     }
 
     // NOTE: this won't actually write into the database, it just creates an SCR locally
-    function CreateSCD(latitude: number, longitude: number, height: number, url: string, id: number): any {
+    function CreateSCR(latitude: number, longitude: number, height: number, url: string, id: number): any {
         //SCR
 
-        const quat = toQuaternion(longitude);
+        const quat = toQuaternion(-1 * longitude);
 
         const geoPose = {
             position: {
@@ -335,7 +413,7 @@
             title: 'minecraft dirt block',
             refs: [ref],
             geopose: geoPose,
-            object_description: 'object_description',
+            size: 0.5,
         };
 
         const timestamp = new Date().getTime();
@@ -382,7 +460,7 @@
                 const height = 0.5 * cell.get_height();
                 const url = cell.content.blocks[i].get_url();
 
-                let scr = CreateSCD(latitude, longitude, height, url, i);
+                let scr = CreateSCR(latitude, longitude, height, url, i);
 
                 parentInstance.placeContent([[scr]]);
             }
@@ -416,6 +494,52 @@
                 break;
         }
     }
+
+    function changeDimensions() {
+        //Only can be used when not using fixated model sizes
+        /*if (dimension >= 1) {
+            dimension = 0;
+        }
+
+        dimension++;
+        S2_LEVEL = S2BaseLevel + dimension;*/
+    }
+
+    export function onNetworkEvent(events: any) {
+        if (!('message_broadcasted' in events) && !('object_created' in events)) {
+            console.log('Minecraft viewer: Unknown event received:');
+            console.log(events);
+            // pass on to parent
+            return parentInstance.onNetworkEvent(events);
+        }
+
+        if (get(recentLocalisation)?.geopose?.position == undefined) {
+            // we need to localize at least once to be able to do anything
+            console.log('Network event received but we are not localized yet!');
+            console.log(events);
+            return;
+        }
+
+        if ('message_broadcasted' in events) {
+            const data = events.message_broadcasted;
+            //if (data.sender != $peerIdStr) { // ignore own messages which are also delivered
+            if ('message' in data && 'sender' in data) {
+                console.log('message from ' + data.sender + ': \n  ' + data.message);
+            }
+            //}
+        }
+
+        if ('object_created' in events) {
+            const data = events.object_created;
+            //if (data.sender != $peerIdStr) { // ignore own messages which are also delivered
+            const scr = data.scr;
+            if ('tenant' in scr && scr.tenant === 'minecraft_experiment') {
+                parentInstance.placeContent([[scr]]); // WARNING: wrap into an array
+            }
+            //}
+        }
+    }
+
 </script>
 
 <Parent bind:this={parentInstance} on:arSessionEnded>
@@ -433,6 +557,7 @@
                 on:stone={() => chooseBlock('stone')}
                 on:cobblestone={() => chooseBlock('cobblestone')}
                 on:placeBlock={() => experimentTapHandler()}
+                on:dimensions={() => changeDimensions()}
             />
         {/if}
     </svelte:fragment>

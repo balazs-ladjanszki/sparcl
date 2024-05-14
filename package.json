@@ -64,6 +64,7 @@
     "amqplib": "^0.10.3",
     "automerge": "^0.14.2",
     "chai": "^4.2.0",
+    "child_process": "^1.0.2",
     "eventemitter3": "^5.0.1",
     "geodesy": "^2.2.1",
     "gl-matrix": "^3.3.0",

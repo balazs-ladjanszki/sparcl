@@ -24,20 +24,21 @@
             <img src="/media/refresh.svg" alt="refresh icon" />
         </button>
         <button class="secondary" on:click={() => dispatch('grass')}>
-            <img src="/media/icons/grass_x48.PNG" alt="refresh icon" />
+            <img src="/media/icons/grass_x48.PNG" alt="grass icon" />
         </button>
         <button class="secondary" on:click={() => dispatch('log')}>
-            <img src="/media/icons/log_x48.PNG" alt="refresh icon" />
+            <img src="/media/icons/log_x48.PNG" alt="log icon" />
         </button>
         <button class="secondary" on:click={() => dispatch('dirt')}>
-            <img src="/media/icons/dirt_x48.PNG" alt="refresh icon" />
+            <img src="/media/icons/dirt_x48.PNG" alt="dirt icon" />
         </button>
         <button class="secondary" on:click={() => dispatch('stone')}>
-            <img src="/media/icons/stone_x48.PNG" alt="refresh icon" />
+            <img src="/media/icons/stone_x48.PNG" alt="stone icon" />
         </button>
         <button class="secondary" on:click={() => dispatch('cobblestone')}>
-            <img src="/media/icons/cobblestone_x48.PNG" alt="refresh icon" />
+            <img src="/media/icons/cobblestone_x48.PNG" alt="cobblestone icon" />
         </button>
+        <button class="prime" on:click={() => dispatch('dimensions')}>Change dimensions</button>
     {/if}
 {/if}
 
