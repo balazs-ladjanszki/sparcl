@@ -1,15 +1,20 @@
-const s2 = require('s2-geometry').S2;
+lat = 47;
+lon = 19;
 
-function getCellIdFromLatLng(lat, lng, level = 15) {
-    const cell = s2.CellId.fromLatLng(new s2.LatLng(lat, lng));
-    return cell.parent(level).toString();
-}
+const url = 'https://esoptron.hu:8036/getPoints?lat=' + lat + '&lon=' + lon + '&lvl=24'
 
-// Example coordinates (latitude, longitude)
-const latitude = 37.7749;
-const longitude = -122.4194;
+console.log(url)
 
-// Get the S2 cell ID from the coordinates
-const cellId = getCellIdFromLatLng(latitude, longitude);
-
-console.log("S2 Cell ID:", cellId);
+fetch(url)
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`API request failed with status ${response.status}`);
+      }
+      return response.json();
+    })
+    .then(data => {
+      console.log("API response:", data);
+    })
+    .catch(error => {
+      console.error("Error:", error);
+    });

@@ -2,9 +2,25 @@ from flask import Flask, request, jsonify
 import s2sphere
 from s2sphere import CellId, LatLng, Cell
 
+from flask_cors import cross_origin # we need to add CORS headers to be able to use WebApp clients
+
+
 app = Flask(__name__)
 
+
+# handle CORS preflight which is sent as an OPTIONS request
+@app.route('/getPoints', methods=['OPTIONS'])
+@cross_origin() # we need to add CORS headers to be able to use WebApp clients
+def geoposeOptions():
+    response = make_response()
+    # simply allow everything
+    response.headers.add("Access-Control-Allow-Origin", "*")
+    response.headers.add("Access-Control-Allow-Headers", "*")
+    response.headers.add("Access-Control-Allow-Methods", "*")
+    return response
+
 @app.route('/getPoints')
+@cross_origin() # we need to add CORS headers to be able to use WebApp clients
 def Points():
     lat = request.args.get('lat')
     lon = request.args.get('lon')
@@ -43,4 +59,8 @@ def Points():
     return jsonify(data) , 200
 
 if __name__ == '__main__':
-    app.run(debug = True, host = '0.0.0.0')
+    #my_ssl_context = ('C:/Program Files/Git/usr/bin/cert.pem', 'C:/Program Files/Git/usr/bin/key.pem')
+    my_ssl_context=None
+    my_port = 8036
+    app.run(debug = True, host = '0.0.0.0', port = my_port, ssl_context=my_ssl_context)
+

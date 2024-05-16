@@ -17,6 +17,7 @@
     import { getAutomergeDocumentData } from '../../../core/p2pnetwork';
     import { GEOPOSE } from '@src/core/common';
     import { GeoPoseRequest } from '@oarc/gpp-access';
+    import type { forEach } from 'lodash';
     //import { spawn } from 'child_process';
 
     //We are using level 24 because it is approximately 0.5m in sidelength
@@ -33,7 +34,7 @@
     let hitTestSource: XRHitTestSource | undefined;
     let minecraftOverlay: MinecraftOverlay;
     let parentState = writable<{ hasLostTracking: boolean; isLocalized: boolean; localisation: boolean; isLocalisationDone: boolean; showFooter: boolean }>();
-    
+    let intervalId: any
     let log: Block;
     let grass: Block;
     //let plank: Block;
@@ -41,6 +42,7 @@
     let stone: Block;
     let cobblestone: Block;
     let chosenBlock: Block;
+    let models : any[] = [];
     
     const dispatch = createEventDispatcher<{ broadcast: { event: string; value: any; routing_key?: string } }>();
     
@@ -86,6 +88,8 @@
 
         startSession();
         initializeBlocks();
+        //intervalId = setInterval(() => getPoints(reticle), 500);
+        
     }
 
     /**
@@ -138,6 +142,7 @@
                 $parentState.showFooter = ($settings.showstats || ($settings.localisation && !$parentState.isLocalisationDone)) as boolean;
                 if (reticle === null) {
                     reticle = tdEngine.addReticle();
+                    intervalId = setInterval(() => getPoints(reticle), 500);
                 }
                 const reticlePose = hitTestResults[0].getPose(floorSpaceReference);
                 const position = reticlePose?.transform.position;
@@ -204,7 +209,6 @@
         s2cell_id: number;
         height: number;
         content: {
-            height_offset: number;
             blocks: any[];
         };
 
@@ -213,7 +217,6 @@
             this.s2cell_id = id;
             this.height = 0;
             this.content = {
-                height_offset: 0,
                 blocks: [],
             };
         }
@@ -239,28 +242,6 @@
 
     // Cell map
     let cellMap: Map<number, Cell> = new Map();
-
-    /*function showPoints(lat: number, lon: number) {
-        const data_to_send = {
-            lat: lat,
-            lon: lon,
-            lvl: S2_LEVEL,
-            v0lat: undefined,
-            v0lon: undefined,
-            v1lat: undefined,
-            v1lon: undefined,
-            v2lat: undefined,
-            v2lon: undefined,
-            v3lat: undefined,
-            v3lon: undefined,
-        };
-
-        const python_process = spawn('python3', ['./communication.py', JSON.stringify(data_to_send)]);
-
-        python_process.stdout.on('data', (data: any) => {
-            console.log('Data recieved: ', JSON.parse(data));
-        });
-    }*/
 
     function newBlock(latitude: number, longitude: number, block: Block): void {
         // Get the id of the S2 cell on level 24 (S2_LEVEL)
@@ -342,11 +323,8 @@
             // when received, place the same way as a downloaded SCR.
             if ($parentState.isLocalisationDone) {
                 const globalObjectPose = tdEngine.convertLocalPoseToGeoPose(reticle.position, reticle.quaternion);
-                console.log(globalObjectPose.position + '  globalobjectpose');
                 const latitude = globalObjectPose.position.lat;
                 const longitude = globalObjectPose.position.lon;
-                console.log(longitude);
-                console.log('new block called');
                 newBlock(latitude, longitude, chosenBlock);
             }
         }
@@ -465,7 +443,7 @@
         S2_LEVEL = S2BaseLevel + dimension;*/
     }
 
-    export function onNetworkEvent(events: any) {
+    export function onNetworkEvent(events: any,) {
         if (!('message_broadcasted' in events) && !('object_created' in events)) {
             console.log('Minecraft viewer: Unknown event received:');
             console.log(events);
@@ -499,6 +477,106 @@
             //}
         }
     }
+
+    function getPoints(reticle: any){
+
+    const globalObjectPose = tdEngine.convertLocalPoseToGeoPose(reticle.position, reticle.quaternion);
+    const latitude = globalObjectPose.position.lat;
+    const longitude = globalObjectPose.position.lon;
+
+    let key = S2.latLngToKey(latitude, longitude, S2_LEVEL);
+    let id = S2.keyToId(key);
+
+    const latlng = S2.idToLatLng(id);
+    let cellLatitude = latlng.lat;
+    let cellLongitude = latlng.lng;
+    
+    if(models.length > 0){
+        models.forEach(function(element){
+            tdEngine.remove(element);
+        });
+    }
+
+    models = [];
+
+
+    const url = 'https://esoptron.hu:8036/getPoints?lat=' + cellLatitude + '&lon=' + cellLongitude + '&lvl=24'
+
+    if ($parentState.hasLostTracking == false && reticle != null) {
+        if ($parentState.isLocalisationDone) {
+            fetch(url)
+            .then(response => {
+            if (!response.ok) {
+                throw new Error(`API request failed with status ${response.status}`);
+            }
+            return response.json();
+    })
+    .then(data => {
+      console.log("API response:", data);
+
+      let v0 = {
+        lat: data.v0lat,
+        lon: data.v0lon
+      }
+      let v1 = {
+        lat: data.v1lat,
+        lon: data.v1lon
+      }
+      let v2 = {
+        lat: data.v2lat,
+        lon: data.v2lon
+      }
+      let v3 = {
+        lat: data.v3lat,
+        lon: data.v3lon
+      }
+
+      let points = [v0, v1, v2, v3]
+
+      points.forEach(function(element){
+        let quat = toQuaternion(-1 * element.lon);
+
+        let globalpose = {
+            position: {
+                lat: element.lat,
+                lon: element.lon,
+                h: 0,
+            },
+            quaternion: {
+                x: quat.qX,
+                y: quat.qY,
+                z: quat.qZ,
+                w: quat.qW,
+            },
+        };
+
+        const localpose = tdEngine.convertGeoPoseToLocalPose(globalpose);
+
+        let model = tdEngine.addModel(chosenBlock.getUrl(), localpose.position, localpose.quaternion, new Vec3(0.1, 0.1, 0.1));
+        models.push(model);
+
+      });
+
+    })
+    .catch(error => {
+      console.error("Error:", error);
+    });
+
+
+    /*const xhr = new XMLHttpRequest();
+    xhr.open("GET", url);
+    xhr.send();
+    xhr.onreadystatechange = function() {
+    if (xhr.status === 200) {
+        const data = JSON.parse(xhr.responseText);
+        console.log("API response:", data);
+    // Process the data here
+    } else {
+        console.error("Error:", xhr.statusText);
+    } */
+}
+}
+}
 
 </script>
 
