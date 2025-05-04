@@ -18,27 +18,27 @@
 
 {#if $experimentModeSettings?.minecraft.showstats}
     <p>Minecraft demo</p>
-    <!--<button class="prime" on:click={() => dispatch('placeBlock')}>Place Block</button>-->
+    <button class="prime" on:click={() => dispatch('placeBlock')}>Place Block</button>
     {#if $experimentModeSettings.minecraft.localisation}
         <button class="secondary" on:click={() => dispatch('relocalize')}>
             <img src="/media/refresh.svg" alt="refresh icon" />
         </button>
         <button class="secondary" on:click={() => dispatch('grass')}>
-            <img src=/media/grass_48x.svg alt="grass icon" />
+            <img src="/media/icons/grass_x48.PNG" alt="grass icon" />
         </button>
         <button class="secondary" on:click={() => dispatch('log')}>
-            <img src="/media/log_48x.svg" alt="log icon" />
+            <img src="/media/icons/log_x48.PNG" alt="log icon" />
         </button>
         <button class="secondary" on:click={() => dispatch('dirt')}>
-            <img src="/media/dirt_48x.svg" alt="dirt icon" />
+            <img src="/media/icons/dirt_x48.PNG" alt="dirt icon" />
         </button>
         <button class="secondary" on:click={() => dispatch('stone')}>
-            <img src="/media/stone_48x.svg" alt="stone icon" />ő
+            <img src="/media/icons/stone_x48.PNG" alt="stone icon" />
         </button>
         <button class="secondary" on:click={() => dispatch('cobblestone')}>
-            <img src="/media/cobblestone_48x.svg" alt="cobblestone icon" />
+            <img src="/media/icons/cobblestone_x48.PNG" alt="cobblestone icon" />
         </button>
-        <!--<button class="prime" on:click={() => dispatch('dimensions')}>Change dimensions</button>-->
+        <button class="prime" on:click={() => dispatch('dimensions')}>Change dimensions</button>
     {/if}
 {/if}
 

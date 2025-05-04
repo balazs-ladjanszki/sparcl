@@ -43,7 +43,6 @@
     let cobblestone: Block;
     let chosenBlock: Block;
     let models : any[] = [];
-    let previousID = 0;
     
     const dispatch = createEventDispatcher<{ broadcast: { event: string; value: any; routing_key?: string } }>();
     
@@ -265,7 +264,6 @@
         const latlng = S2.idToLatLng(id);
         let cellLatitude = latlng.lat;
         let cellLongitude = latlng.lng;
-        console.log(cellLatitude);
         console.log(latlng);
         let height = (0.5 / 2 ** dimension) * current_cell.getHeight();
         let scr = CreateSCR(cellLatitude, cellLongitude, height, block.getUrl(), block.getId());
@@ -488,8 +486,7 @@
 
     let key = S2.latLngToKey(latitude, longitude, S2_LEVEL);
     let id = S2.keyToId(key);
-    if(id != previousID){
-    previousID = id;
+
     const latlng = S2.idToLatLng(id);
     let cellLatitude = latlng.lat;
     let cellLongitude = latlng.lng;
@@ -567,7 +564,6 @@
 }
 }
 }
-    }
 
 </script>
 
@@ -585,6 +581,8 @@
                 on:dirt={() => chooseBlock('dirt')}
                 on:stone={() => chooseBlock('stone')}
                 on:cobblestone={() => chooseBlock('cobblestone')}
+                on:placeBlock={() => experimentTapHandler()}
+                on:dimensions={() => changeDimensions()}
             />
         {/if}
     </svelte:fragment>
