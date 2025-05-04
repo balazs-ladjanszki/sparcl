@@ -33,7 +33,7 @@
             <img src="/media/dirt_48x.svg" alt="dirt icon" />
         </button>
         <button class="secondary" on:click={() => dispatch('stone')}>
-            <img src="/media/stone_48x.svg" alt="stone icon" />ő
+            <img src="/media/stone_48x.svg" alt="stone icon" />
         </button>
         <button class="secondary" on:click={() => dispatch('cobblestone')}>
             <img src="/media/cobblestone_48x.svg" alt="cobblestone icon" />
