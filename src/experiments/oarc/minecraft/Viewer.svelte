@@ -503,7 +503,7 @@
     models = [];
 
 
-    const url = 'https://esoptron.hu:8036/getPoints?lat=' + cellLatitude + '&lon=' + cellLongitude + '&lvl=24'
+    const url = 'https://esoptron.hu:8042/getPoints?lat=' + cellLatitude + '&lon=' + cellLongitude + '&lvl=24'
 
     if ($parentState.hasLostTracking == false && reticle != null) {
         if ($parentState.isLocalisationDone) {
